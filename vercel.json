@@ -4,32 +4,21 @@
         {
             "src": "app.py",
             "use": "@vercel/python"
-        },
-        {
-            "src": "*.html",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "*.js",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "*.css",
-            "use": "@vercel/static"
         }
     ],
     "routes": [
         {
-            "src": "/api/(.*)",
+            "src": "/(.*)",
             "dest": "app.py"
-        },
-        {
-            "src": "/",
-            "dest": "index.html"
-        },
-        {
-            "src": "/(.+)",
-            "dest": "/$1"
         }
-    ]
+    ],
+    "env": {
+        "PYTHONPATH": ".",
+        "FFMPEG_BINARY": "/usr/bin/ffmpeg"
+    },
+    "build": {
+        "env": {
+            "PYTHONPATH": "."
+        }
+    }
 }

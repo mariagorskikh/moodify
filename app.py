@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
-import pafy
+import yt_dlp
 import os
 import tempfile
 import uuid
@@ -19,27 +19,39 @@ TEMP_DIR = '/tmp'
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 def download_audio(url):
-    """Download audio using pafy."""
+    """Download audio using yt-dlp."""
     try:
-        # Create pafy object
-        video = pafy.new(url)
-        
-        # Get best audio stream
-        audio = video.getbestaudio()
-        if not audio:
-            raise ValueError("No audio stream found")
-            
         # Generate unique filename
-        filename = f"audio_{uuid.uuid4()}{audio.extension}"
+        filename = f"audio_{uuid.uuid4()}.mp3"
         output_path = os.path.join(TEMP_DIR, filename)
         
-        # Download the file
-        audio.download(filepath=output_path)
+        # Configure yt-dlp options
+        ydl_opts = {
+            'format': 'bestaudio/best',  # Choose best audio format
+            'outtmpl': output_path,      # Output template
+            'postprocessors': [{          # Extract audio
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'no_warnings': True,          # Reduce output
+            'quiet': True,
+            'extract_flat': True,         # Don't download playlists
+            'force_generic_extractor': False,
+            'cachedir': False,            # Disable cache
+        }
         
-        if not os.path.exists(output_path):
+        # Download the audio
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"Downloading audio from: {url}")
+            ydl.download([url])
+        
+        # Check if file exists (yt-dlp adds extension)
+        final_path = output_path + '.mp3'
+        if not os.path.exists(final_path):
             raise ValueError("Failed to download audio")
             
-        return output_path
+        return final_path
         
     except Exception as e:
         logger.error(f"Error downloading audio: {str(e)}")
