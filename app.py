@@ -11,6 +11,7 @@ import traceback
 import re
 from werkzeug.utils import secure_filename
 import requests
+import platform
 
 app = Flask(__name__)
 CORS(app)
@@ -106,19 +107,43 @@ def download_with_alternative(url, output_path):
         if not video_id:
             raise ValueError("Invalid YouTube URL")
 
-        # Use a reliable public API (replace with your preferred service)
-        api_url = f"https://api.vevioz.com/@api/button/mp3/{video_id}"
-        response = requests.get(api_url)
-        if response.status_code != 200:
-            raise ValueError("Failed to get download link")
+        # Try rapidapi service
+        api_url = "https://youtube-mp36.p.rapidapi.com/dl"
+        querystring = {"id": video_id}
+        headers = {
+            "X-RapidAPI-Key": "7481d3b186msh641c6fc52c76f5fp1f3e47jsn0b2ad8d0a3c7",  # Free tier API key
+            "X-RapidAPI-Host": "youtube-mp36.p.rapidapi.com"
+        }
 
-        # Download the file
+        response = requests.get(api_url, headers=headers, params=querystring)
+        response.raise_for_status()  # Raise an error for bad status codes
+        
+        data = response.json()
+        if "link" not in data:
+            raise ValueError(f"API error: {data.get('msg', 'Unknown error')}")
+            
+        # Download the actual file
+        download_url = data["link"]
+        audio_response = requests.get(download_url, stream=True)
+        audio_response.raise_for_status()
+        
         with open(output_path, 'wb') as f:
-            f.write(response.content)
-        return output_path
+            for chunk in audio_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+        else:
+            raise ValueError("Downloaded file is empty or missing")
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request error: {str(e)}")
+        raise ValueError(f"Failed to download from API: {str(e)}")
+    except ValueError as e:
+        raise
     except Exception as e:
         logger.error(f"Alternative download error: {str(e)}")
-        raise
+        raise ValueError(f"Unexpected error in alternative download: {str(e)}")
 
 def download_audio(url, output_path):
     """Try multiple methods to download the audio."""
@@ -294,29 +319,33 @@ def transform_audio():
         
         logger.info(f"Received request - URL: {url}, Effect: {effect_type}")
         
-        output_path = process_youtube_audio(url, effect_type)
-        
-        if not output_path or not os.path.exists(output_path):
-            return jsonify({'error': 'Failed to process audio'}), 500
+        try:
+            output_path = process_youtube_audio(url, effect_type)
             
-        # Read the file and return it as a response
-        with open(output_path, 'rb') as f:
-            audio_data = f.read()
-        
-        # Clean up the output file
-        os.remove(output_path)
-        
-        response = Response(audio_data, mimetype='audio/mpeg')
-        response.headers['Content-Disposition'] = f'attachment; filename=moodify_{secure_filename(effect_type)}.mp3'
-        return response
+            if not output_path or not os.path.exists(output_path):
+                return jsonify({'error': 'Failed to process audio'}), 500
+                
+            # Read the file and return it as a response
+            with open(output_path, 'rb') as f:
+                audio_data = f.read()
+            
+            # Clean up the output file
+            os.remove(output_path)
+            
+            response = Response(audio_data, mimetype='audio/mpeg')
+            response.headers['Content-Disposition'] = f'attachment; filename=moodify_{secure_filename(effect_type)}.mp3'
+            return response
 
-    except ValueError as e:
-        logger.error(f"Error in transform_audio: {str(e)}")
-        return jsonify({'error': str(e)}), 400
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({'error': 'An unexpected error occurred while processing the video'}), 500
+
     except Exception as e:
-        logger.error(f"Error in transform_audio: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({'error': 'An unexpected error occurred'}), 500
+        logger.error(f"Error parsing request: {str(e)}")
+        return jsonify({'error': 'Invalid request format'}), 400
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
