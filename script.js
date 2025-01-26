@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
             buttonContainer.classList.add('hidden');
             audioClip.classList.add('hidden');
 
-            const response = await fetch('http://localhost:5005/api/transform', {
+            const response = await fetch('/api/transform', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp
 import os
@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Create temporary directories for processing
-TEMP_DIR = tempfile.mkdtemp()
+TEMP_DIR = '/tmp' if os.getenv('VERCEL') else tempfile.mkdtemp()
 OUTPUT_DIR = os.path.join(TEMP_DIR, 'output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -77,72 +77,67 @@ def download_audio(url, output_path):
 def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
     """Apply audio effect using FFmpeg."""
     try:
-        logger.info(f"Input path exists: {os.path.exists(input_path)}")
-        logger.info(f"Input path size: {os.path.getsize(input_path) if os.path.exists(input_path) else 'file not found'}")
-        
-        # Define effect parameters for each vibe
+        # Define effect parameters based on type
         effect_params = {
             'slow_reverb': {
                 'speed': 0.85,
-                'reverb_delay': 60,
-                'reverb_decay': 0.4
+                'reverb_delay': 100,
+                'reverb_decay': 10
             },
             'energetic': {
                 'speed': 1.2,
-                'reverb_delay': 20,
-                'reverb_decay': 0.2
+                'reverb_delay': 30,
+                'reverb_decay': 2
             },
             'dark': {
                 'speed': 0.8,
                 'reverb_delay': 100,
-                'reverb_decay': 0.6
+                'reverb_decay': 15
             },
             'cute': {
                 'speed': 1.1,
-                'reverb_delay': 30,
-                'reverb_decay': 0.3
+                'reverb_delay': 20,
+                'reverb_decay': 2
             },
             'cool': {
                 'speed': 0.95,
                 'reverb_delay': 50,
-                'reverb_decay': 0.5
+                'reverb_decay': 5
             },
             'happy': {
                 'speed': 1.05,
                 'reverb_delay': 40,
-                'reverb_decay': 0.3
+                'reverb_decay': 4
             },
             'intense': {
                 'speed': 1.15,
-                'reverb_delay': 25,
-                'reverb_decay': 0.2
+                'reverb_delay': 20,
+                'reverb_decay': 2
             },
             'melodic': {
                 'speed': 1.0,
-                'reverb_delay': 70,
-                'reverb_decay': 0.5
+                'reverb_delay': 60,
+                'reverb_decay': 8
             },
             'chill': {
                 'speed': 0.9,
                 'reverb_delay': 80,
-                'reverb_decay': 0.4
+                'reverb_decay': 6
             },
             'sleepy': {
                 'speed': 0.75,
-                'reverb_delay': 90,
-                'reverb_decay': 0.7
+                'reverb_delay': 120,
+                'reverb_decay': 12
             }
         }
         
-        # Get effect parameters or use default
         params = effect_params.get(effect_type, effect_params['slow_reverb'])
         
-        # Build FFmpeg command with parameters
-        filter_complex = (
-            f'[0:a]asetrate=44100*{params["speed"]},aresample=44100,atempo=1.0[s];'
-            f'[s]aecho=0.8:0.88:{params["reverb_delay"]}:{params["reverb_decay"]}[e]'
-        )
+        # Construct FFmpeg filter
+        filter_complex = f"asetrate=44100*{params['speed']},aresample=44100," + \
+                        f"aecho=0.8:0.8:{params['reverb_delay']}:{params['reverb_decay']}[e]"
         
+        # Construct FFmpeg command
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-filter_complex', filter_complex,
@@ -150,23 +145,19 @@ def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
             '-acodec', 'libmp3lame', '-q:a', '2',
             output_path
         ]
-
-        logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        logger.info(f"FFmpeg stdout: {result.stdout}")
-        logger.info(f"FFmpeg stderr: {result.stderr}")
         
-        if not os.path.exists(output_path):
-            logger.error("Output file was not created")
+        # Run FFmpeg
+        logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
             return False
             
-        logger.info(f"Output file created successfully, size: {os.path.getsize(output_path)}")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg error: {e.stderr}")
-        return False
+        return os.path.exists(output_path)
+        
     except Exception as e:
-        logger.error(f"Unexpected error in apply_audio_effect: {str(e)}")
+        logger.error(f"Error in apply_audio_effect: {str(e)}")
         logger.error(traceback.format_exc())
         return False
 
@@ -219,32 +210,30 @@ def process_youtube_audio(url, effect_type='slow_reverb'):
 def transform_audio():
     try:
         data = request.get_json()
-        logger.info(f"Received request data: {data}")
         
         if not data or 'url' not in data:
-            logger.error("No URL provided in request")
             return jsonify({'error': 'No URL provided'}), 400
-        
+            
         url = data['url']
         effect_type = data.get('effect_type', 'slow_reverb')
         
-        logger.info(f"Processing URL: {url} with effect: {effect_type}")
+        logger.info(f"Received request - URL: {url}, Effect: {effect_type}")
         
-        # Process the audio
         output_path = process_youtube_audio(url, effect_type)
         
-        if not os.path.exists(output_path):
-            logger.error("Output file not found after processing")
-            return jsonify({'error': 'Failed to create output file'}), 500
+        if not output_path or not os.path.exists(output_path):
+            return jsonify({'error': 'Failed to process audio'}), 500
+            
+        # Read the file and return it as a response
+        with open(output_path, 'rb') as f:
+            audio_data = f.read()
         
-        logger.info(f"Sending processed file: {output_path}")
-        # Return the processed file
-        return send_file(
-            output_path,
-            mimetype='audio/mpeg',
-            as_attachment=True,
-            download_name=f"moodify_{secure_filename(effect_type)}.mp3"
-        )
+        # Clean up the output file
+        os.remove(output_path)
+        
+        response = Response(audio_data, mimetype='audio/mpeg')
+        response.headers['Content-Disposition'] = f'attachment; filename=moodify_{secure_filename(effect_type)}.mp3'
+        return response
 
     except ValueError as e:
         logger.error(f"Error in transform_audio: {str(e)}")
@@ -258,5 +247,6 @@ def transform_audio():
 def health_check():
     return jsonify({'status': 'healthy'}), 200
 
+# For local development
 if __name__ == '__main__':
     app.run(debug=True, port=5005)
