@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moodify - Transform Your Music</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>MOODIFY</h1>
+        <p>Transform your music into different vibes</p>
+        
+        <div class="input-section">
+            <input type="text" id="youtube-link" placeholder="Paste YouTube link here...">
+            <div class="emoji-container"></div>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="loading-spinner"></div>
+            <p>Transforming your audio...</p>
+        </div>
+
+        <audio id="audio-clip" controls class="hidden"></audio>
+
+        <div class="button-container hidden">
+            <button id="save-clip" class="neon-button">Download</button>
+            <button id="retry" class="neon-button">Try Another</button>
+            <button id="share" class="neon-button">Share</button>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
