@@ -13,19 +13,27 @@ RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '7481d3b186msh641c6fc52c76f5fp1f3e47jsn
 def extract_video_id(url):
     """Extract video ID from YouTube URL."""
     try:
+        logger.info(f"Extracting video ID from URL: {url}")
+        
         # Try parsing URL
         parsed_url = urlparse(url)
         
         # Check for youtu.be
         if parsed_url.netloc == 'youtu.be':
-            return parsed_url.path[1:]
+            video_id = parsed_url.path[1:]
+            logger.info(f"Extracted video ID from youtu.be URL: {video_id}")
+            return video_id
         
         # Check for youtube.com
         if parsed_url.netloc in ['youtube.com', 'www.youtube.com']:
             if parsed_url.path == '/watch':
-                return parse_qs(parsed_url.query).get('v', [None])[0]
+                video_id = parse_qs(parsed_url.query).get('v', [None])[0]
+                logger.info(f"Extracted video ID from youtube.com watch URL: {video_id}")
+                return video_id
             elif parsed_url.path.startswith(('/embed/', '/v/')):
-                return parsed_url.path.split('/')[2]
+                video_id = parsed_url.path.split('/')[2]
+                logger.info(f"Extracted video ID from embed/v URL: {video_id}")
+                return video_id
         
         # Try regex as fallback
         patterns = [
@@ -37,8 +45,11 @@ def extract_video_id(url):
         for pattern in patterns:
             match = re.search(pattern, url)
             if match:
-                return match.group(1)
+                video_id = match.group(1)
+                logger.info(f"Extracted video ID using regex: {video_id}")
+                return video_id
                 
+        logger.error("Could not extract video ID from URL")
         raise ValueError("Could not extract video ID from URL")
         
     except Exception as e:
@@ -66,11 +77,18 @@ def download_audio(url):
         
         # Get download link
         logger.info("Requesting download link from API...")
+        logger.info(f"API URL: {api_url}")
+        logger.info(f"Query params: {querystring}")
+        
         response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
         response.raise_for_status()
         
+        logger.info(f"API response status: {response.status_code}")
+        logger.info(f"API response headers: {response.headers}")
+        
         try:
             data = response.json()
+            logger.info(f"API response data: {data}")
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON response: {response.text}")
             raise ValueError("Invalid response from API")
@@ -85,14 +103,20 @@ def download_audio(url):
             logger.error(f"No download URL in response: {data}")
             raise ValueError("No download URL in API response")
             
-        logger.info("Got download URL, downloading audio...")
+        logger.info(f"Got download URL: {download_url}")
         
         # Download the audio file
+        logger.info("Downloading audio file...")
         audio_response = requests.get(download_url, stream=True, timeout=30)
         audio_response.raise_for_status()
         
+        logger.info(f"Audio download status: {audio_response.status_code}")
+        logger.info(f"Audio response headers: {audio_response.headers}")
+        
         # Check content type
         content_type = audio_response.headers.get('content-type', '')
+        logger.info(f"Audio content type: {content_type}")
+        
         if not content_type.startswith('audio/'):
             logger.error(f"Invalid content type: {content_type}")
             raise ValueError("Invalid content type in response")
@@ -102,6 +126,7 @@ def download_audio(url):
         
         # Verify we got some data
         if not audio_data:
+            logger.error("No audio data received")
             raise ValueError("No audio data received")
             
         logger.info(f"Successfully downloaded {len(audio_data)} bytes of audio")
