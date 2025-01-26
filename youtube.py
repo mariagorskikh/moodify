@@ -4,6 +4,7 @@ import json
 import logging
 from urllib.parse import parse_qs, urlparse
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +67,13 @@ def download_audio(url):
             
         logger.info(f"Extracted video ID: {video_id}")
         
-        # Use RapidAPI YouTube MP3 Converter
-        api_url = "https://youtube-mp3-downloader2.p.rapidapi.com/ytmp3/ytmp3/"
-        querystring = {"url": f"https://www.youtube.com/watch?v={video_id}"}
+        # First API endpoint - get download link
+        api_url = "https://youtube-mp36.p.rapidapi.com/dl"
+        querystring = {"id": video_id}
         
         headers = {
             "X-RapidAPI-Key": RAPIDAPI_KEY,
-            "X-RapidAPI-Host": "youtube-mp3-downloader2.p.rapidapi.com"
+            "X-RapidAPI-Host": "youtube-mp36.p.rapidapi.com"
         }
         
         # Get download link
@@ -97,7 +98,13 @@ def download_audio(url):
             logger.error(f"Unexpected response format: {data}")
             raise ValueError("Invalid response format from API")
             
-        # Get download URL from response
+        # Check status
+        status = data.get('status')
+        if status != 'ok':
+            logger.error(f"API returned non-ok status: {status}")
+            raise ValueError(f"API error: {data.get('msg', 'Unknown error')}")
+            
+        # Get download URL
         download_url = data.get('link')
         if not download_url:
             logger.error(f"No download URL in response: {data}")
@@ -107,20 +114,12 @@ def download_audio(url):
         
         # Download the audio file
         logger.info("Downloading audio file...")
-        audio_response = requests.get(download_url, stream=True, timeout=30)
+        audio_response = requests.get(download_url, timeout=30)
         audio_response.raise_for_status()
         
         logger.info(f"Audio download status: {audio_response.status_code}")
         logger.info(f"Audio response headers: {audio_response.headers}")
         
-        # Check content type
-        content_type = audio_response.headers.get('content-type', '')
-        logger.info(f"Audio content type: {content_type}")
-        
-        if not content_type.startswith('audio/'):
-            logger.error(f"Invalid content type: {content_type}")
-            raise ValueError("Invalid content type in response")
-            
         # Get the audio data
         audio_data = audio_response.content
         

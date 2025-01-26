@@ -51,25 +51,20 @@ def transform_audio():
             
             if not audio_data:
                 logger.error("No audio data received from download_audio")
-                raise ValueError("No audio data received")
+                return jsonify({'error': 'No audio data received'}), 400
                 
             # Log audio data info
             logger.info(f"Received audio data: {len(audio_data)} bytes")
             
             # Create response with explicit headers
-            headers = {
-                'Content-Type': 'audio/mpeg',
-                'Content-Disposition': 'attachment; filename=audio.mp3',
-                'Content-Length': str(len(audio_data))
-            }
-            
-            # Log response headers
-            logger.info(f"Setting response headers: {headers}")
-            
             response = Response(
                 audio_data,
                 mimetype='audio/mpeg',
-                headers=headers
+                headers={
+                    'Content-Type': 'audio/mpeg',
+                    'Content-Length': str(len(audio_data)),
+                    'Cache-Control': 'no-cache'
+                }
             )
             
             # Log response info
