@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 import logging
 import traceback
+import sys
 from youtube import download_audio
 
 app = Flask(__name__)
@@ -10,7 +11,8 @@ CORS(app)
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout  # Ensure logs go to stdout for Vercel
 )
 logger = logging.getLogger(__name__)
 
@@ -28,21 +30,30 @@ def serve_static(path):
 def transform_audio():
     """Transform YouTube URL to audio."""
     try:
-        # Log request
+        # Log request details
         logger.info("Received /api/transform request")
+        logger.info(f"Request headers: {dict(request.headers)}")
         
         # Validate request
         if not request.is_json:
             logger.error("Request is not JSON")
-            return jsonify({'error': 'Request must be JSON'}), 400
+            return jsonify({
+                'error': 'Request must be JSON',
+                'details': 'Content-Type header must be application/json'
+            }), 400
 
         data = request.get_json()
+        logger.info(f"Request data: {data}")
+        
         if not data or 'url' not in data:
             logger.error("No URL in request data")
-            return jsonify({'error': 'No URL provided'}), 400
+            return jsonify({
+                'error': 'No URL provided',
+                'details': 'Request body must include a url field'
+            }), 400
 
         url = data['url']
-        logger.info(f"Processing request for URL: {url}")
+        logger.info(f"Processing URL: {url}")
         
         try:
             # Download audio
@@ -50,13 +61,16 @@ def transform_audio():
             audio_data = download_audio(url)
             
             if not audio_data or len(audio_data) == 0:
-                logger.error("No audio data received from download_audio")
-                return jsonify({'error': 'No audio data received'}), 400
+                logger.error("No audio data received")
+                return jsonify({
+                    'error': 'No audio data received',
+                    'details': 'The download process completed but no audio data was returned'
+                }), 400
                 
-            # Log audio data info
-            logger.info(f"Received audio data: {len(audio_data)} bytes")
+            # Log success
+            logger.info(f"Successfully downloaded {len(audio_data)} bytes of audio")
             
-            # Create response with explicit headers
+            # Create response
             response = Response(
                 audio_data,
                 status=200,
@@ -64,31 +78,38 @@ def transform_audio():
                 direct_passthrough=True
             )
             
-            # Set headers explicitly after creation
+            # Set headers
             response.headers['Content-Type'] = 'audio/mpeg'
             response.headers['Content-Length'] = str(len(audio_data))
             response.headers['Accept-Ranges'] = 'bytes'
             response.headers['Cache-Control'] = 'no-cache'
             
-            # Log response info
-            logger.info(f"Created response object: {response}")
-            logger.info(f"Response headers: {response.headers}")
+            # Log response details
+            logger.info(f"Response headers: {dict(response.headers)}")
             
-            logger.info("Successfully processed request")
             return response
             
         except ValueError as e:
-            logger.error(f"Value error: {str(e)}")
-            return jsonify({'error': str(e)}), 400
+            logger.error(f"Value error in download: {str(e)}")
+            return jsonify({
+                'error': str(e),
+                'details': 'Error occurred while processing the YouTube URL'
+            }), 400
         except Exception as e:
-            logger.error(f"Error processing audio: {str(e)}\n{traceback.format_exc()}")
-            return jsonify({'error': 'Failed to process audio', 'details': str(e)}), 500
+            logger.error(f"Error processing audio: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return jsonify({
+                'error': 'Failed to process audio',
+                'details': str(e),
+                'traceback': traceback.format_exc()
+            }), 500
             
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e),
+            'details': str(e),
             'traceback': traceback.format_exc()
         }), 500
 
