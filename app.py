@@ -9,6 +9,7 @@ import logging
 import traceback
 import re
 from werkzeug.utils import secure_filename
+import platform
 
 app = Flask(__name__)
 CORS(app)
@@ -27,6 +28,17 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 logger.info(f"Temporary directory created at: {TEMP_DIR}")
 logger.info(f"Output directory created at: {OUTPUT_DIR}")
+
+def get_cookie_path():
+    """Get the path to browser cookies based on the operating system."""
+    system = platform.system()
+    if system == 'Darwin':  # macOS
+        return os.path.expanduser('~/Library/Application Support/Google/Chrome')
+    elif system == 'Linux':
+        return os.path.expanduser('~/.config/google-chrome')
+    elif system == 'Windows':
+        return os.path.expanduser('~\\AppData\\Local\\Google\\Chrome\\User Data')
+    return None
 
 def extract_video_id(url):
     """Extract the video ID from various YouTube URL formats."""
@@ -56,23 +68,26 @@ def download_audio(url, output_path):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            # Add these options to bypass restrictions
+            'cookiesfrombrowser': ('chrome',),  # Use Chrome cookies
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'logtostderr': False,
-            'no_warnings': True,
-            'quiet': True,
             'extractor_args': {
                 'youtube': {
                     'skip': ['dash', 'hls'],
                     'player_skip': ['js', 'configs', 'webpage']
                 }
             },
-            # Add common browser user-agent
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
         }
+
+        # Try to get cookies from the browser
+        cookie_path = get_cookie_path()
+        if cookie_path:
+            logger.info(f"Using cookies from: {cookie_path}")
+            ydl_opts['cookiefile'] = cookie_path
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             logger.info(f"Downloading audio from: {url}")
@@ -88,8 +103,13 @@ def download_audio(url, output_path):
             
     except Exception as e:
         logger.error(f"Error downloading audio: {str(e)}")
-        if "Sign in to confirm you're not a bot" in str(e):
+        error_msg = str(e)
+        if "Sign in to confirm you're not a bot" in error_msg:
             raise ValueError("YouTube is requiring verification. Please try a different video or try again later.")
+        elif "This video is not available" in error_msg:
+            raise ValueError("This video is not available. Please try a different video.")
+        elif "Private video" in error_msg:
+            raise ValueError("This is a private video. Please try a different video.")
         raise ValueError(f"Failed to download video: {str(e)}")
 
 def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
