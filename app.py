@@ -3,6 +3,7 @@ from flask_cors import CORS
 import logging
 import traceback
 import sys
+import os
 from youtube import download_audio
 
 app = Flask(__name__)
@@ -26,6 +27,42 @@ def serve_static(path):
     """Serve static files"""
     return send_from_directory('.', path)
 
+@app.route('/api/debug', methods=['GET'])
+def debug_info():
+    """Debug endpoint to check environment and configuration."""
+    try:
+        # Get environment variables
+        api_key = os.getenv('RAPIDAPI_KEY', 'Not set')
+        python_path = os.getenv('PYTHONPATH', 'Not set')
+        
+        # Check if we can import required modules
+        import requests
+        requests_version = requests.__version__
+        
+        # Get all environment variables
+        all_env = {k: v for k, v in os.environ.items() if not k.lower().startswith('key')}
+        
+        return jsonify({
+            'status': 'debug',
+            'environment': {
+                'RAPIDAPI_KEY': 'Present' if api_key != 'Not set' else 'Missing',
+                'PYTHONPATH': python_path,
+                'PWD': os.getcwd(),
+                'All Environment': all_env
+            },
+            'dependencies': {
+                'requests': requests_version
+            },
+            'files': os.listdir('.')
+        })
+    except Exception as e:
+        logger.error(f"Debug endpoint error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
 @app.route('/api/transform', methods=['POST'])
 def transform_audio():
     """Transform YouTube URL to audio."""
@@ -34,6 +71,15 @@ def transform_audio():
         logger.info("Received /api/transform request")
         logger.info(f"Request headers: {dict(request.headers)}")
         
+        # Check environment
+        api_key = os.getenv('RAPIDAPI_KEY')
+        if not api_key:
+            logger.error("RAPIDAPI_KEY not set")
+            return jsonify({
+                'error': 'API key not configured',
+                'details': 'Server configuration error'
+            }), 500
+            
         # Validate request
         if not request.is_json:
             logger.error("Request is not JSON")
@@ -118,7 +164,10 @@ def health_check():
     """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
-        'message': 'Service is running'
+        'message': 'Service is running',
+        'environment': {
+            'RAPIDAPI_KEY': 'Present' if os.getenv('RAPIDAPI_KEY') else 'Missing'
+        }
     }), 200
 
 if __name__ == '__main__':
