@@ -3,8 +3,12 @@ import re
 import json
 import logging
 from urllib.parse import parse_qs, urlparse
+import os
 
 logger = logging.getLogger(__name__)
+
+# Get API key from environment variable or use default
+RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '7481d3b186msh641c6fc52c76f5fp1f3e47jsn0b2ad8d0a3c7')
 
 def extract_video_id(url):
     """Extract video ID from YouTube URL."""
@@ -35,11 +39,11 @@ def extract_video_id(url):
             if match:
                 return match.group(1)
                 
-        return None
+        raise ValueError("Could not extract video ID from URL")
         
     except Exception as e:
         logger.error(f"Error extracting video ID: {str(e)}")
-        return None
+        raise ValueError(f"Invalid YouTube URL: {str(e)}")
 
 def download_audio(url):
     """Download audio from YouTube URL using RapidAPI."""
@@ -56,13 +60,13 @@ def download_audio(url):
         querystring = {"url": f"https://www.youtube.com/watch?v={video_id}"}
         
         headers = {
-            "X-RapidAPI-Key": "7481d3b186msh641c6fc52c76f5fp1f3e47jsn0b2ad8d0a3c7",
+            "X-RapidAPI-Key": RAPIDAPI_KEY,
             "X-RapidAPI-Host": "youtube-mp3-downloader2.p.rapidapi.com"
         }
         
         # Get download link
         logger.info("Requesting download link from API...")
-        response = requests.get(api_url, headers=headers, params=querystring)
+        response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
         response.raise_for_status()
         
         try:
@@ -84,7 +88,7 @@ def download_audio(url):
         logger.info("Got download URL, downloading audio...")
         
         # Download the audio file
-        audio_response = requests.get(download_url, stream=True)
+        audio_response = requests.get(download_url, stream=True, timeout=30)
         audio_response.raise_for_status()
         
         # Check content type
@@ -103,6 +107,9 @@ def download_audio(url):
         logger.info(f"Successfully downloaded {len(audio_data)} bytes of audio")
         return audio_data
         
+    except requests.exceptions.Timeout:
+        logger.error("Request timed out")
+        raise ValueError("Request timed out - please try again")
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         raise ValueError(f"Failed to download audio: {str(e)}")
