@@ -59,11 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
             buttonContainer.classList.add('hidden');
             audioClip.classList.add('hidden');
 
-            const response = await fetch('/api/transform', {
+            const response = await fetch('http://localhost:5005/api/transform', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'audio/mpeg,application/json'
                 },
                 body: JSON.stringify({
                     url: url,
@@ -71,46 +70,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             });
 
-            const contentType = response.headers.get('content-type');
-            
-            // Log response details for debugging
-            console.log('Response status:', response.status);
-            console.log('Content-Type:', contentType);
-            
             if (!response.ok) {
-                const text = await response.text();
-                console.log('Error response:', text);
-                try {
-                    const errorData = JSON.parse(text);
-                    throw new Error(errorData.error || 'Failed to process audio');
-                } catch (e) {
-                    throw new Error(text || 'Failed to process audio');
-                }
-            }
-
-            if (contentType && contentType.includes('application/json')) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Failed to process audio');
             }
 
-            if (!contentType || !contentType.includes('audio/')) {
-                throw new Error('Invalid response format. Expected audio file.');
-            }
-
             const blob = await response.blob();
-            if (blob.size === 0) {
-                throw new Error('Received empty audio file');
+            
+            // Revoke the old URL if it exists
+            if (processedAudioUrl) {
+                URL.revokeObjectURL(processedAudioUrl);
             }
-
-            const audioUrl = URL.createObjectURL(blob);
-            audioClip.src = audioUrl;
+            
+            processedAudioUrl = URL.createObjectURL(blob);
+            
+            audioClip.src = processedAudioUrl;
             audioClip.classList.remove('hidden');
             buttonContainer.classList.remove('hidden');
-            
-            // Clean up the old audio URL
-            audioClip.onload = () => {
-                URL.revokeObjectURL(audioUrl);
-            };
             
             // Start playing automatically
             try {
@@ -124,10 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             loadingDiv.classList.add('hidden');
         }
-    }
-
-    function showError(message) {
-        alert(message);
     }
 
     youtubeInput.addEventListener('keypress', (e) => {

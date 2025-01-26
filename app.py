@@ -1,174 +1,262 @@
-from flask import Flask, request, jsonify, Response, send_from_directory
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import yt_dlp
+import os
+import tempfile
+import uuid
+import subprocess
 import logging
 import traceback
-import sys
-import os
-from youtube import download_audio
+import re
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 CORS(app)
 
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stdout  # Ensure logs go to stdout for Vercel
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-@app.route('/')
-def serve_index():
-    """Serve index.html"""
-    return send_from_directory('.', 'index.html')
+# Create temporary directories for processing
+TEMP_DIR = tempfile.mkdtemp()
+OUTPUT_DIR = os.path.join(TEMP_DIR, 'output')
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-@app.route('/<path:path>')
-def serve_static(path):
-    """Serve static files"""
-    return send_from_directory('.', path)
+logger.info(f"Temporary directory created at: {TEMP_DIR}")
+logger.info(f"Output directory created at: {OUTPUT_DIR}")
 
-@app.route('/api/debug', methods=['GET'])
-def debug_info():
-    """Debug endpoint to check environment and configuration."""
+def extract_video_id(url):
+    """Extract the video ID from various YouTube URL formats."""
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
+        r'(?:embed\/)([0-9A-Za-z_-]{11})',
+        r'(?:watch\?v=)([0-9A-Za-z_-]{11})'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+def download_audio(url, output_path):
+    """Download audio from YouTube using yt-dlp."""
     try:
-        # Get environment variables
-        api_key = os.getenv('RAPIDAPI_KEY', 'Not set')
-        python_path = os.getenv('PYTHONPATH', 'Not set')
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'extract_audio': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
         
-        # Check if we can import required modules
-        import requests
-        requests_version = requests.__version__
-        
-        # Get all environment variables
-        all_env = {k: v for k, v in os.environ.items() if not k.lower().startswith('key')}
-        
-        return jsonify({
-            'status': 'debug',
-            'environment': {
-                'RAPIDAPI_KEY': 'Present' if api_key != 'Not set' else 'Missing',
-                'PYTHONPATH': python_path,
-                'PWD': os.getcwd(),
-                'All Environment': all_env
-            },
-            'dependencies': {
-                'requests': requests_version
-            },
-            'files': os.listdir('.')
-        })
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"Downloading audio from: {url}")
+            ydl.download([url])
+            
+        # yt-dlp adds extension, so we need to check for the actual file
+        mp3_path = output_path + '.mp3'
+        if os.path.exists(mp3_path):
+            return mp3_path
+        else:
+            logger.error(f"Expected file not found: {mp3_path}")
+            raise ValueError("Failed to download audio")
+            
     except Exception as e:
-        logger.error(f"Debug endpoint error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
+        logger.error(f"Error downloading audio: {str(e)}")
+        raise ValueError(f"Failed to download video: {str(e)}")
+
+def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
+    """Apply audio effect using FFmpeg."""
+    try:
+        logger.info(f"Input path exists: {os.path.exists(input_path)}")
+        logger.info(f"Input path size: {os.path.getsize(input_path) if os.path.exists(input_path) else 'file not found'}")
+        
+        # Define effect parameters for each vibe
+        effect_params = {
+            'slow_reverb': {
+                'speed': 0.85,
+                'reverb_delay': 60,
+                'reverb_decay': 0.4
+            },
+            'energetic': {
+                'speed': 1.2,
+                'reverb_delay': 20,
+                'reverb_decay': 0.2
+            },
+            'dark': {
+                'speed': 0.8,
+                'reverb_delay': 100,
+                'reverb_decay': 0.6
+            },
+            'cute': {
+                'speed': 1.1,
+                'reverb_delay': 30,
+                'reverb_decay': 0.3
+            },
+            'cool': {
+                'speed': 0.95,
+                'reverb_delay': 50,
+                'reverb_decay': 0.5
+            },
+            'happy': {
+                'speed': 1.05,
+                'reverb_delay': 40,
+                'reverb_decay': 0.3
+            },
+            'intense': {
+                'speed': 1.15,
+                'reverb_delay': 25,
+                'reverb_decay': 0.2
+            },
+            'melodic': {
+                'speed': 1.0,
+                'reverb_delay': 70,
+                'reverb_decay': 0.5
+            },
+            'chill': {
+                'speed': 0.9,
+                'reverb_delay': 80,
+                'reverb_decay': 0.4
+            },
+            'sleepy': {
+                'speed': 0.75,
+                'reverb_delay': 90,
+                'reverb_decay': 0.7
+            }
+        }
+        
+        # Get effect parameters or use default
+        params = effect_params.get(effect_type, effect_params['slow_reverb'])
+        
+        # Build FFmpeg command with parameters
+        filter_complex = (
+            f'[0:a]asetrate=44100*{params["speed"]},aresample=44100,atempo=1.0[s];'
+            f'[s]aecho=0.8:0.88:{params["reverb_delay"]}:{params["reverb_decay"]}[e]'
+        )
+        
+        cmd = [
+            'ffmpeg', '-y', '-i', input_path,
+            '-filter_complex', filter_complex,
+            '-map', '[e]',
+            '-acodec', 'libmp3lame', '-q:a', '2',
+            output_path
+        ]
+
+        logger.info(f"Running FFmpeg command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        logger.info(f"FFmpeg stdout: {result.stdout}")
+        logger.info(f"FFmpeg stderr: {result.stderr}")
+        
+        if not os.path.exists(output_path):
+            logger.error("Output file was not created")
+            return False
+            
+        logger.info(f"Output file created successfully, size: {os.path.getsize(output_path)}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg error: {e.stderr}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error in apply_audio_effect: {str(e)}")
+        logger.error(traceback.format_exc())
+        return False
+
+def process_youtube_audio(url, effect_type='slow_reverb'):
+    """Download and process YouTube audio."""
+    download_path = None
+    try:
+        logger.info(f"Processing YouTube URL: {url}")
+        
+        # Extract video ID and construct clean URL
+        video_id = extract_video_id(url)
+        if not video_id:
+            raise ValueError("Invalid YouTube URL format")
+            
+        clean_url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.info(f"Clean YouTube URL: {clean_url}")
+        
+        # Generate unique filename
+        temp_filename = f"{uuid.uuid4()}"
+        download_path = os.path.join(TEMP_DIR, temp_filename)
+        output_path = os.path.join(OUTPUT_DIR, f"{temp_filename}.mp3")
+
+        # Download the audio
+        downloaded_file = download_audio(clean_url, download_path)
+        logger.info(f"Download completed, file size: {os.path.getsize(downloaded_file)}")
+
+        # Convert and apply effect
+        logger.info("Applying audio effect...")
+        if not apply_audio_effect(downloaded_file, output_path, effect_type):
+            raise ValueError("Failed to process audio with effects")
+        logger.info("Audio effect applied successfully")
+
+        # Clean up downloaded file
+        os.remove(downloaded_file)
+        logger.info("Cleaned up temporary files")
+
+        return output_path
+
+    except ValueError as e:
+        # Re-raise user-friendly errors
+        raise
+    except Exception as e:
+        logger.error(f"Error in process_youtube_audio: {str(e)}")
+        logger.error(traceback.format_exc())
+        if download_path and os.path.exists(download_path + '.mp3'):
+            os.remove(download_path + '.mp3')
+        raise ValueError("An unexpected error occurred while processing the video")
 
 @app.route('/api/transform', methods=['POST'])
 def transform_audio():
-    """Transform YouTube URL to audio."""
     try:
-        # Log request details
-        logger.info("Received /api/transform request")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        
-        # Check environment
-        api_key = os.getenv('RAPIDAPI_KEY')
-        if not api_key:
-            logger.error("RAPIDAPI_KEY not set")
-            return jsonify({
-                'error': 'API key not configured',
-                'details': 'Server configuration error'
-            }), 500
-            
-        # Validate request
-        if not request.is_json:
-            logger.error("Request is not JSON")
-            return jsonify({
-                'error': 'Request must be JSON',
-                'details': 'Content-Type header must be application/json'
-            }), 400
-
         data = request.get_json()
-        logger.info(f"Request data: {data}")
+        logger.info(f"Received request data: {data}")
         
         if not data or 'url' not in data:
-            logger.error("No URL in request data")
-            return jsonify({
-                'error': 'No URL provided',
-                'details': 'Request body must include a url field'
-            }), 400
-
-        url = data['url']
-        logger.info(f"Processing URL: {url}")
+            logger.error("No URL provided in request")
+            return jsonify({'error': 'No URL provided'}), 400
         
-        try:
-            # Download audio
-            logger.info("Starting audio download...")
-            audio_data = download_audio(url)
-            
-            if not audio_data or len(audio_data) == 0:
-                logger.error("No audio data received")
-                return jsonify({
-                    'error': 'No audio data received',
-                    'details': 'The download process completed but no audio data was returned'
-                }), 400
-                
-            # Log success
-            logger.info(f"Successfully downloaded {len(audio_data)} bytes of audio")
-            
-            # Create response
-            response = Response(
-                audio_data,
-                status=200,
-                mimetype='audio/mpeg',
-                direct_passthrough=True
-            )
-            
-            # Set headers
-            response.headers['Content-Type'] = 'audio/mpeg'
-            response.headers['Content-Length'] = str(len(audio_data))
-            response.headers['Accept-Ranges'] = 'bytes'
-            response.headers['Cache-Control'] = 'no-cache'
-            
-            # Log response details
-            logger.info(f"Response headers: {dict(response.headers)}")
-            
-            return response
-            
-        except ValueError as e:
-            logger.error(f"Value error in download: {str(e)}")
-            return jsonify({
-                'error': str(e),
-                'details': 'Error occurred while processing the YouTube URL'
-            }), 400
-        except Exception as e:
-            logger.error(f"Error processing audio: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return jsonify({
-                'error': 'Failed to process audio',
-                'details': str(e),
-                'traceback': traceback.format_exc()
-            }), 500
-            
+        url = data['url']
+        effect_type = data.get('effect_type', 'slow_reverb')
+        
+        logger.info(f"Processing URL: {url} with effect: {effect_type}")
+        
+        # Process the audio
+        output_path = process_youtube_audio(url, effect_type)
+        
+        if not os.path.exists(output_path):
+            logger.error("Output file not found after processing")
+            return jsonify({'error': 'Failed to create output file'}), 500
+        
+        logger.info(f"Sending processed file: {output_path}")
+        # Return the processed file
+        return send_file(
+            output_path,
+            mimetype='audio/mpeg',
+            as_attachment=True,
+            download_name=f"moodify_{secure_filename(effect_type)}.mp3"
+        )
+
+    except ValueError as e:
+        logger.error(f"Error in transform_audio: {str(e)}")
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            'error': 'Internal server error',
-            'details': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
+        logger.error(f"Error in transform_audio: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': 'An unexpected error occurred'}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
-    return jsonify({
-        'status': 'healthy',
-        'message': 'Service is running',
-        'environment': {
-            'RAPIDAPI_KEY': 'Present' if os.getenv('RAPIDAPI_KEY') else 'Missing'
-        }
-    }), 200
+    return jsonify({'status': 'healthy'}), 200
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5005)
