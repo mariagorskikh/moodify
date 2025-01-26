@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
+from pytube import YouTube
 import yt_dlp
 import os
 import tempfile
@@ -9,7 +10,7 @@ import logging
 import traceback
 import re
 from werkzeug.utils import secure_filename
-import platform
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -54,8 +55,22 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
-def download_audio(url, output_path):
-    """Download audio from YouTube using yt-dlp."""
+def download_with_pytube(url, output_path):
+    """Download audio using pytube."""
+    try:
+        yt = YouTube(url)
+        stream = yt.streams.filter(only_audio=True).first()
+        if not stream:
+            raise ValueError("No audio stream found")
+        
+        downloaded_file = stream.download(filename=output_path)
+        return downloaded_file
+    except Exception as e:
+        logger.error(f"Pytube error: {str(e)}")
+        raise
+
+def download_with_yt_dlp(url, output_path):
+    """Download audio using yt-dlp."""
     try:
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -68,49 +83,71 @@ def download_audio(url, output_path):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'cookiesfrombrowser': ('chrome',),  # Use Chrome cookies
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'logtostderr': False,
-            'extractor_args': {
-                'youtube': {
-                    'skip': ['dash', 'hls'],
-                    'player_skip': ['js', 'configs', 'webpage']
-                }
-            },
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
         }
-
-        # Try to get cookies from the browser
-        cookie_path = get_cookie_path()
-        if cookie_path:
-            logger.info(f"Using cookies from: {cookie_path}")
-            ydl_opts['cookiefile'] = cookie_path
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info(f"Downloading audio from: {url}")
             ydl.download([url])
-            
-        # yt-dlp adds extension, so we need to check for the actual file
+        
         mp3_path = output_path + '.mp3'
         if os.path.exists(mp3_path):
             return mp3_path
-        else:
-            logger.error(f"Expected file not found: {mp3_path}")
-            raise ValueError("Failed to download audio")
-            
+        raise ValueError("Failed to download with yt-dlp")
     except Exception as e:
-        logger.error(f"Error downloading audio: {str(e)}")
-        error_msg = str(e)
-        if "Sign in to confirm you're not a bot" in error_msg:
-            raise ValueError("YouTube is requiring verification. Please try a different video or try again later.")
-        elif "This video is not available" in error_msg:
-            raise ValueError("This video is not available. Please try a different video.")
-        elif "Private video" in error_msg:
-            raise ValueError("This is a private video. Please try a different video.")
-        raise ValueError(f"Failed to download video: {str(e)}")
+        logger.error(f"yt-dlp error: {str(e)}")
+        raise
+
+def download_with_alternative(url, output_path):
+    """Download audio using a public YouTube to MP3 API."""
+    try:
+        video_id = extract_video_id(url)
+        if not video_id:
+            raise ValueError("Invalid YouTube URL")
+
+        # Use a reliable public API (replace with your preferred service)
+        api_url = f"https://api.vevioz.com/@api/button/mp3/{video_id}"
+        response = requests.get(api_url)
+        if response.status_code != 200:
+            raise ValueError("Failed to get download link")
+
+        # Download the file
+        with open(output_path, 'wb') as f:
+            f.write(response.content)
+        return output_path
+    except Exception as e:
+        logger.error(f"Alternative download error: {str(e)}")
+        raise
+
+def download_audio(url, output_path):
+    """Try multiple methods to download the audio."""
+    errors = []
+    
+    # Try pytube first
+    try:
+        logger.info("Attempting download with pytube...")
+        return download_with_pytube(url, output_path)
+    except Exception as e:
+        errors.append(f"Pytube: {str(e)}")
+        logger.warning("Pytube failed, trying yt-dlp...")
+
+    # Try yt-dlp next
+    try:
+        return download_with_yt_dlp(url, output_path)
+    except Exception as e:
+        errors.append(f"yt-dlp: {str(e)}")
+        logger.warning("yt-dlp failed, trying alternative method...")
+
+    # Try alternative method
+    try:
+        return download_with_alternative(url, output_path)
+    except Exception as e:
+        errors.append(f"Alternative: {str(e)}")
+        logger.error("All download methods failed")
+
+    # If all methods fail, raise an error with details
+    raise ValueError(f"Failed to download video after trying multiple methods. Errors: {'; '.join(errors)}")
 
 def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
     """Apply audio effect using FFmpeg."""

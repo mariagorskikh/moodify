@@ -3,4 +3,5 @@ Flask-CORS==4.0.0
 Werkzeug==2.3.7
 yt-dlp==2025.1.26
 python-ffmpeg==2.0.2
-browser-cookie3==0.19.1
+pytube==15.0.0
+requests==2.31.0
