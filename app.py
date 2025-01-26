@@ -56,6 +56,22 @@ def download_audio(url, output_path):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
+            # Add these options to bypass restrictions
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'logtostderr': False,
+            'no_warnings': True,
+            'quiet': True,
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls'],
+                    'player_skip': ['js', 'configs', 'webpage']
+                }
+            },
+            # Add common browser user-agent
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -72,6 +88,8 @@ def download_audio(url, output_path):
             
     except Exception as e:
         logger.error(f"Error downloading audio: {str(e)}")
+        if "Sign in to confirm you're not a bot" in str(e):
+            raise ValueError("YouTube is requiring verification. Please try a different video or try again later.")
         raise ValueError(f"Failed to download video: {str(e)}")
 
 def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
