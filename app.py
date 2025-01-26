@@ -6,6 +6,7 @@ import tempfile
 import uuid
 import logging
 from werkzeug.utils import secure_filename
+from youtube import download_audio
 
 app = Flask(__name__)
 CORS(app)
@@ -17,45 +18,6 @@ logger = logging.getLogger(__name__)
 # Create temporary directory
 TEMP_DIR = '/tmp'
 os.makedirs(TEMP_DIR, exist_ok=True)
-
-def download_audio(url):
-    """Download audio using yt-dlp."""
-    try:
-        # Generate unique filename
-        filename = f"audio_{uuid.uuid4()}.mp3"
-        output_path = os.path.join(TEMP_DIR, filename)
-        
-        # Configure yt-dlp options
-        ydl_opts = {
-            'format': 'bestaudio/best',  # Choose best audio format
-            'outtmpl': output_path,      # Output template
-            'postprocessors': [{          # Extract audio
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'no_warnings': True,          # Reduce output
-            'quiet': True,
-            'extract_flat': True,         # Don't download playlists
-            'force_generic_extractor': False,
-            'cachedir': False,            # Disable cache
-        }
-        
-        # Download the audio
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info(f"Downloading audio from: {url}")
-            ydl.download([url])
-        
-        # Check if file exists (yt-dlp adds extension)
-        final_path = output_path + '.mp3'
-        if not os.path.exists(final_path):
-            raise ValueError("Failed to download audio")
-            
-        return final_path
-        
-    except Exception as e:
-        logger.error(f"Error downloading audio: {str(e)}")
-        raise ValueError(f"Failed to download video: {str(e)}")
 
 @app.route('/api/transform', methods=['POST'])
 def transform_audio():
@@ -73,17 +35,7 @@ def transform_audio():
         
         try:
             # Download audio
-            output_path = download_audio(url)
-            
-            # Read and return the file
-            with open(output_path, 'rb') as f:
-                audio_data = f.read()
-                
-            # Clean up
-            try:
-                os.remove(output_path)
-            except Exception as e:
-                logger.warning(f"Failed to clean up file: {str(e)}")
+            audio_data = download_audio(url)
             
             # Return audio file
             response = Response(audio_data, mimetype='audio/mpeg')
