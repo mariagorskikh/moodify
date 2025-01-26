@@ -49,10 +49,19 @@ def transform_audio():
             logger.info("Starting audio download...")
             audio_data = download_audio(url)
             
-            # Create response
-            logger.info("Creating response...")
-            response = Response(audio_data, mimetype='audio/mpeg')
-            response.headers['Content-Disposition'] = 'attachment; filename=audio.mp3'
+            if not audio_data:
+                raise ValueError("No audio data received")
+            
+            # Create response with explicit headers
+            response = Response(
+                audio_data,
+                mimetype='audio/mpeg',
+                headers={
+                    'Content-Type': 'audio/mpeg',
+                    'Content-Disposition': 'attachment; filename=audio.mp3',
+                    'Content-Length': str(len(audio_data))
+                }
+            )
             
             logger.info("Successfully processed request")
             return response

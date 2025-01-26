@@ -95,21 +95,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Check content type
             const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('audio/')) {
-                throw new Error('Invalid response format. Expected audio file.');
+            if (contentType && contentType.includes('application/json')) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to process audio');
             }
 
-            // Get the audio blob
-            const audioBlob = await response.blob();
+            // Handle audio response
+            const blob = await response.blob();
+            const audioUrl = URL.createObjectURL(blob);
             
-            // Revoke the old URL if it exists
-            if (processedAudioUrl) {
-                URL.revokeObjectURL(processedAudioUrl);
-            }
-            
-            processedAudioUrl = URL.createObjectURL(audioBlob);
-            
-            audioClip.src = processedAudioUrl;
+            // Update audio player
+            audioClip.src = audioUrl;
             audioClip.classList.remove('hidden');
             buttonContainer.classList.remove('hidden');
             
