@@ -1,11 +1,10 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
-from pytube import YouTube
+import pafy
 import os
 import tempfile
 import uuid
 import logging
-import traceback
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -20,22 +19,22 @@ TEMP_DIR = '/tmp'
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 def download_audio(url):
-    """Download audio using pytube."""
+    """Download audio using pafy."""
     try:
-        # Extract video ID from URL
-        yt = YouTube(url)
+        # Create pafy object
+        video = pafy.new(url)
         
-        # Get audio stream
-        stream = yt.streams.filter(only_audio=True).first()
-        if not stream:
+        # Get best audio stream
+        audio = video.getbestaudio()
+        if not audio:
             raise ValueError("No audio stream found")
             
         # Generate unique filename
-        filename = f"audio_{uuid.uuid4()}.mp3"
+        filename = f"audio_{uuid.uuid4()}{audio.extension}"
         output_path = os.path.join(TEMP_DIR, filename)
         
         # Download the file
-        stream.download(output_path=TEMP_DIR, filename=filename)
+        audio.download(filepath=output_path)
         
         if not os.path.exists(output_path):
             raise ValueError("Failed to download audio")
@@ -48,7 +47,7 @@ def download_audio(url):
 
 @app.route('/api/transform', methods=['POST'])
 def transform_audio():
-    """Transform audio from YouTube URL."""
+    """Download audio from YouTube URL."""
     try:
         if not request.is_json:
             return jsonify({'error': 'Request must be JSON'}), 400
