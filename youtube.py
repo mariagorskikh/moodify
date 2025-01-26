@@ -4,12 +4,11 @@ import json
 import logging
 from urllib.parse import parse_qs, urlparse
 import os
-import time
 
 logger = logging.getLogger(__name__)
 
 # Get API key from environment variable or use default
-RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '7481d3b186msh641c6fc52c76f5fp1f3e47jsn0b2ad8d0a3c7')
+RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY')
 
 def extract_video_id(url):
     """Extract video ID from YouTube URL."""
@@ -60,63 +59,56 @@ def extract_video_id(url):
 def download_audio(url):
     """Download audio from YouTube URL using RapidAPI."""
     try:
-        # Log environment
-        api_key = os.getenv('RAPIDAPI_KEY')
-        logger.info(f"API Key present: {bool(api_key)}")
+        # Check environment
+        api_key = RAPIDAPI_KEY
+        if not api_key:
+            raise ValueError("RAPIDAPI_KEY environment variable is not set")
+        logger.info("API key is configured")
         
         # Extract video ID
         video_id = extract_video_id(url)
-        logger.info(f"Video ID: {video_id}")
+        logger.info(f"Processing video ID: {video_id}")
         
-        # API configuration
-        api_url = "https://youtube-mp36.p.rapidapi.com/dl"
-        querystring = {"id": video_id}
+        # Use YouTube MP3 Converter API
+        api_url = "https://youtube-mp3-converter-v2.p.rapidapi.com/ytmp3/url"
+        querystring = {"url": f"https://www.youtube.com/watch?v={video_id}"}
         
         headers = {
             "X-RapidAPI-Key": api_key,
-            "X-RapidAPI-Host": "youtube-mp36.p.rapidapi.com"
+            "X-RapidAPI-Host": "youtube-mp3-converter-v2.p.rapidapi.com"
         }
         
         # Log request details
-        logger.info(f"Making request to: {api_url}")
+        logger.info(f"Making API request to: {api_url}")
+        logger.info(f"Headers: {headers}")
         logger.info(f"Query params: {querystring}")
         
-        # Get download link
+        # Make API request
         response = requests.get(api_url, headers=headers, params=querystring, timeout=30)
         
         # Log response details
-        logger.info(f"Response status: {response.status_code}")
-        logger.info(f"Response headers: {response.headers}")
+        logger.info(f"API response status: {response.status_code}")
+        logger.info(f"API response headers: {dict(response.headers)}")
         
         try:
             response_text = response.text
-            logger.info(f"Response text: {response_text}")
+            logger.info(f"API response text: {response_text}")
             data = response.json()
-            logger.info(f"Response data: {data}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON: {str(e)}")
-            logger.error(f"Raw response: {response_text}")
-            raise ValueError("Invalid JSON response from API")
+            logger.info(f"API response data: {data}")
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse API response: {response_text}")
+            raise ValueError("Invalid response from API")
         
-        # Check API response
-        if 'status' not in data:
-            logger.error(f"Unexpected API response format: {data}")
-            raise ValueError("Invalid API response format")
-            
-        if data['status'] != 'ok':
-            error_msg = data.get('msg', 'Unknown API error')
-            logger.error(f"API error: {error_msg}")
-            raise ValueError(f"API error: {error_msg}")
-            
         # Get download URL
-        download_url = data.get('link')
-        if not download_url:
-            logger.error("No download URL in response")
-            raise ValueError("No download URL in response")
+        if 'url' not in data:
+            logger.error(f"No download URL in response: {data}")
+            raise ValueError("No download URL in API response")
             
-        logger.info(f"Download URL: {download_url}")
+        download_url = data['url']
+        logger.info(f"Got download URL: {download_url}")
         
-        # Download audio file
+        # Download the audio file
+        logger.info("Downloading audio file...")
         audio_response = requests.get(download_url, timeout=30)
         audio_response.raise_for_status()
         
@@ -138,5 +130,5 @@ def download_audio(url):
         logger.error(f"Request failed: {str(e)}")
         raise ValueError(f"Request failed: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Error downloading audio: {str(e)}")
         raise ValueError(f"Failed to download audio: {str(e)}")
