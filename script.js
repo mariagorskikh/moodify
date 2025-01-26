@@ -70,19 +70,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             });
 
+            // Check if response is ok
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to process audio');
+                let errorText;
+                try {
+                    // Try to parse error as JSON
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const errorData = await response.json();
+                        errorText = errorData.error || 'Failed to process audio';
+                    } else {
+                        // If not JSON, get text
+                        errorText = await response.text();
+                        // If it starts with 'A server error occurred', clean it up
+                        if (errorText.startsWith('A server error occurred')) {
+                            errorText = 'Server error: Failed to process audio. Please try a different video.';
+                        }
+                    }
+                } catch (e) {
+                    errorText = 'Failed to process audio. Please try a different video.';
+                }
+                throw new Error(errorText);
             }
 
-            const blob = await response.blob();
+            // Check content type
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('audio/')) {
+                throw new Error('Invalid response format. Expected audio file.');
+            }
+
+            // Get the audio blob
+            const audioBlob = await response.blob();
             
             // Revoke the old URL if it exists
             if (processedAudioUrl) {
                 URL.revokeObjectURL(processedAudioUrl);
             }
             
-            processedAudioUrl = URL.createObjectURL(blob);
+            processedAudioUrl = URL.createObjectURL(audioBlob);
             
             audioClip.src = processedAudioUrl;
             audioClip.classList.remove('hidden');
@@ -100,6 +125,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             loadingDiv.classList.add('hidden');
         }
+    }
+
+    function showError(message) {
+        alert(message);
     }
 
     youtubeInput.addEventListener('keypress', (e) => {

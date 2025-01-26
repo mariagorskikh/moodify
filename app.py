@@ -308,44 +308,81 @@ def process_youtube_audio(url, effect_type='slow_reverb'):
 
 @app.route('/api/transform', methods=['POST'])
 def transform_audio():
+    """Transform audio from YouTube URL."""
     try:
+        if not request.is_json:
+            return jsonify({'error': 'Request must be JSON'}), 400
+
         data = request.get_json()
-        
         if not data or 'url' not in data:
             return jsonify({'error': 'No URL provided'}), 400
-            
+
         url = data['url']
         effect_type = data.get('effect_type', 'slow_reverb')
         
-        logger.info(f"Received request - URL: {url}, Effect: {effect_type}")
+        logger.info(f"Processing request - URL: {url}, Effect: {effect_type}")
+        
+        # Generate unique filename
+        unique_id = str(uuid.uuid4())
+        output_path = os.path.join(OUTPUT_DIR, f'output_{unique_id}.mp3')
         
         try:
-            output_path = process_youtube_audio(url, effect_type)
+            # Try downloading with primary method
+            logger.info("Attempting primary download method...")
+            downloaded_path = download_with_pytube(url, output_path)
             
-            if not output_path or not os.path.exists(output_path):
-                return jsonify({'error': 'Failed to process audio'}), 500
+        except Exception as e1:
+            logger.warning(f"Primary method failed: {str(e1)}")
+            try:
+                # Try secondary method
+                logger.info("Attempting secondary download method...")
+                downloaded_path = download_with_yt_dlp(url, output_path)
                 
-            # Read the file and return it as a response
-            with open(output_path, 'rb') as f:
-                audio_data = f.read()
+            except Exception as e2:
+                logger.warning(f"Secondary method failed: {str(e2)}")
+                try:
+                    # Try tertiary method
+                    logger.info("Attempting tertiary download method...")
+                    downloaded_path = download_with_alternative(url, output_path)
+                    
+                except Exception as e3:
+                    logger.error("All download methods failed")
+                    error_msg = str(e3) if str(e3) != str(e1) else str(e2)
+                    return jsonify({'error': f'Failed to download video: {error_msg}'}), 400
+
+        if not os.path.exists(downloaded_path):
+            return jsonify({'error': 'Failed to download audio'}), 500
+
+        # Apply audio effect
+        try:
+            processed_path = os.path.join(OUTPUT_DIR, f'processed_{unique_id}.mp3')
+            apply_audio_effect(downloaded_path, processed_path, effect_type)
             
-            # Clean up the output file
-            os.remove(output_path)
+            if not os.path.exists(processed_path):
+                raise Exception("Failed to process audio")
+                
+            # Read and return the processed file
+            with open(processed_path, 'rb') as f:
+                audio_data = f.read()
+                
+            # Clean up
+            try:
+                os.remove(downloaded_path)
+                os.remove(processed_path)
+            except Exception as e:
+                logger.warning(f"Failed to clean up files: {str(e)}")
             
             response = Response(audio_data, mimetype='audio/mpeg')
-            response.headers['Content-Disposition'] = f'attachment; filename=moodify_{secure_filename(effect_type)}.mp3'
+            response.headers['Content-Disposition'] = f'attachment; filename=moodify_{effect_type}.mp3'
             return response
-
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
+            
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({'error': 'An unexpected error occurred while processing the video'}), 500
-
+            logger.error(f"Error processing audio: {str(e)}")
+            return jsonify({'error': f'Failed to process audio: {str(e)}'}), 500
+            
     except Exception as e:
-        logger.error(f"Error parsing request: {str(e)}")
-        return jsonify({'error': 'Invalid request format'}), 400
+        logger.error(f"Unexpected error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
