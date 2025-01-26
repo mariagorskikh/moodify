@@ -1,12 +1,17 @@
+// API endpoint
+const API_URL = 'https://moodify-backend-app-8d6fcd4a2d68.herokuapp.com';
+
 document.addEventListener('DOMContentLoaded', () => {
-    const emojiContainer = document.querySelector('.emoji-container');
     const youtubeInput = document.getElementById('youtube-link');
+    const emojiContainer = document.querySelector('.emoji-container');
     const loadingDiv = document.getElementById('loading');
     const audioClip = document.getElementById('audio-clip');
     const buttonContainer = document.querySelector('.button-container');
-    const saveButton = document.getElementById('save-clip');
     const retryButton = document.getElementById('retry');
     const shareButton = document.getElementById('share');
+
+    let selectedVibe = null;
+    let currentAudioUrl = null;
 
     const vibes = [
         { emoji: '🌙', type: 'slow_reverb', name: 'Dreamy' },
@@ -21,131 +26,111 @@ document.addEventListener('DOMContentLoaded', () => {
         { emoji: '💤', type: 'sleepy', name: 'Sleepy' }
     ];
 
-    let selectedVibe = null;
-    let processedAudioUrl = null;
-
-    // Create emoji buttons with tooltips
+    // Create emoji buttons
     vibes.forEach(vibe => {
         const emojiWrapper = document.createElement('div');
-        emojiWrapper.classList.add('emoji-wrapper');
+        emojiWrapper.className = 'emoji-wrapper';
         
-        const emoji = document.createElement('span');
-        emoji.textContent = vibe.emoji;
-        emoji.classList.add('emoji');
-        
+        const emojiButton = document.createElement('button');
+        emojiButton.className = 'emoji';
+        emojiButton.textContent = vibe.emoji;
+        emojiButton.onclick = () => selectVibe(vibe);
+
         const tooltip = document.createElement('span');
-        tooltip.classList.add('tooltip');
+        tooltip.className = 'tooltip';
         tooltip.textContent = vibe.name;
-        
-        emojiWrapper.appendChild(emoji);
+
+        emojiWrapper.appendChild(emojiButton);
         emojiWrapper.appendChild(tooltip);
         emojiContainer.appendChild(emojiWrapper);
-
-        emoji.addEventListener('click', () => {
-            document.querySelectorAll('.emoji').forEach(e => e.classList.remove('selected'));
-            emoji.classList.add('selected');
-            selectedVibe = vibe;
-            
-            // If we have a processed audio and select a new vibe, enable retry
-            if (processedAudioUrl) {
-                buttonContainer.classList.remove('hidden');
-            }
-        });
     });
 
-    async function processYouTubeLink(url, vibeType) {
+    function selectVibe(vibe) {
+        // Remove selection from all emojis
+        document.querySelectorAll('.emoji').forEach(emoji => {
+            emoji.classList.remove('selected');
+        });
+
+        // Add selection to clicked emoji
+        const clickedEmoji = Array.from(document.querySelectorAll('.emoji'))
+            .find(emoji => emoji.textContent === vibe.emoji);
+        clickedEmoji.classList.add('selected');
+
+        selectedVibe = vibe;
+    }
+
+    async function processYouTubeLink() {
+        const url = youtubeInput.value.trim();
+        if (!url || !selectedVibe) {
+            alert('Please enter a YouTube URL and select a vibe!');
+            return;
+        }
+
         try {
             loadingDiv.classList.remove('hidden');
             buttonContainer.classList.add('hidden');
             audioClip.classList.add('hidden');
 
-            const response = await fetch('http://localhost:5005/api/transform', {
+            const response = await fetch(`${API_URL}/api/transform`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     url: url,
-                    effect_type: vibeType
+                    effect_type: selectedVibe.type
                 })
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to process audio');
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to process audio');
             }
 
             const blob = await response.blob();
+            currentAudioUrl = URL.createObjectURL(blob);
             
-            // Revoke the old URL if it exists
-            if (processedAudioUrl) {
-                URL.revokeObjectURL(processedAudioUrl);
-            }
-            
-            processedAudioUrl = URL.createObjectURL(blob);
-            
-            audioClip.src = processedAudioUrl;
+            audioClip.src = currentAudioUrl;
             audioClip.classList.remove('hidden');
             buttonContainer.classList.remove('hidden');
-            
-            // Start playing automatically
-            try {
-                await audioClip.play();
-            } catch (playError) {
-                console.log('Auto-play failed:', playError);
-            }
-            
+            audioClip.play();
+
         } catch (error) {
-            alert('Error: ' + error.message);
+            alert(error.message);
         } finally {
             loadingDiv.classList.add('hidden');
         }
     }
 
+    // Add event listeners
     youtubeInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && selectedVibe) {
-            const url = youtubeInput.value.trim();
-            if (url) {
-                processYouTubeLink(url, selectedVibe.type);
-            }
-        }
-    });
-
-    saveButton.addEventListener('click', () => {
-        if (processedAudioUrl) {
-            const a = document.createElement('a');
-            a.href = processedAudioUrl;
-            a.download = `moodify_${selectedVibe.type}.mp3`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+        if (e.key === 'Enter') {
+            processYouTubeLink();
         }
     });
 
     retryButton.addEventListener('click', () => {
-        const url = youtubeInput.value.trim();
-        if (url && selectedVibe) {
-            processYouTubeLink(url, selectedVibe.type);
+        // Clear current audio
+        if (currentAudioUrl) {
+            URL.revokeObjectURL(currentAudioUrl);
+            currentAudioUrl = null;
         }
+        audioClip.classList.add('hidden');
+        buttonContainer.classList.add('hidden');
+        processYouTubeLink();
     });
 
-    shareButton.addEventListener('click', () => {
-        if (processedAudioUrl) {
-            // Implement sharing functionality here
-            alert('Sharing coming soon!');
+    shareButton.addEventListener('click', async () => {
+        if (currentAudioUrl) {
+            try {
+                await navigator.share({
+                    title: 'Check out this transformed audio!',
+                    text: 'Listen to this cool audio transformation I made with Moodify!',
+                    url: window.location.href
+                });
+            } catch (err) {
+                console.log('Error sharing:', err);
+            }
         }
-    });
-
-    // Add audio player controls
-    audioClip.addEventListener('play', () => {
-        audioClip.classList.add('playing');
-    });
-
-    audioClip.addEventListener('pause', () => {
-        audioClip.classList.remove('playing');
-    });
-
-    audioClip.addEventListener('ended', () => {
-        audioClip.classList.remove('playing');
     });
 });
