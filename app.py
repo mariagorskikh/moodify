@@ -49,7 +49,7 @@ def transform_audio():
             logger.info("Starting audio download...")
             audio_data = download_audio(url)
             
-            if not audio_data:
+            if not audio_data or len(audio_data) == 0:
                 logger.error("No audio data received from download_audio")
                 return jsonify({'error': 'No audio data received'}), 400
                 
@@ -59,13 +59,16 @@ def transform_audio():
             # Create response with explicit headers
             response = Response(
                 audio_data,
+                status=200,
                 mimetype='audio/mpeg',
-                headers={
-                    'Content-Type': 'audio/mpeg',
-                    'Content-Length': str(len(audio_data)),
-                    'Cache-Control': 'no-cache'
-                }
+                direct_passthrough=True
             )
+            
+            # Set headers explicitly after creation
+            response.headers['Content-Type'] = 'audio/mpeg'
+            response.headers['Content-Length'] = str(len(audio_data))
+            response.headers['Accept-Ranges'] = 'bytes'
+            response.headers['Cache-Control'] = 'no-cache'
             
             # Log response info
             logger.info(f"Created response object: {response}")

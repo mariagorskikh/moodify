@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'audio/mpeg,application/json'
                 },
                 body: JSON.stringify({
                     url: url,
@@ -70,44 +71,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             });
 
-            // Check if response is ok
+            const contentType = response.headers.get('content-type');
+            
+            // Log response details for debugging
+            console.log('Response status:', response.status);
+            console.log('Content-Type:', contentType);
+            
             if (!response.ok) {
-                let errorText;
+                const text = await response.text();
+                console.log('Error response:', text);
                 try {
-                    // Try to parse error as JSON
-                    const contentType = response.headers.get('content-type');
-                    if (contentType && contentType.includes('application/json')) {
-                        const errorData = await response.json();
-                        errorText = errorData.error || 'Failed to process audio';
-                    } else {
-                        // If not JSON, get text
-                        errorText = await response.text();
-                        // If it starts with 'A server error occurred', clean it up
-                        if (errorText.startsWith('A server error occurred')) {
-                            errorText = 'Server error: Failed to process audio. Please try a different video.';
-                        }
-                    }
+                    const errorData = JSON.parse(text);
+                    throw new Error(errorData.error || 'Failed to process audio');
                 } catch (e) {
-                    errorText = 'Failed to process audio. Please try a different video.';
+                    throw new Error(text || 'Failed to process audio');
                 }
-                throw new Error(errorText);
             }
 
-            // Check content type
-            const contentType = response.headers.get('content-type');
             if (contentType && contentType.includes('application/json')) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || 'Failed to process audio');
             }
 
-            // Handle audio response
+            if (!contentType || !contentType.includes('audio/')) {
+                throw new Error('Invalid response format. Expected audio file.');
+            }
+
             const blob = await response.blob();
+            if (blob.size === 0) {
+                throw new Error('Received empty audio file');
+            }
+
             const audioUrl = URL.createObjectURL(blob);
-            
-            // Update audio player
             audioClip.src = audioUrl;
             audioClip.classList.remove('hidden');
             buttonContainer.classList.remove('hidden');
+            
+            // Clean up the old audio URL
+            audioClip.onload = () => {
+                URL.revokeObjectURL(audioUrl);
+            };
             
             // Start playing automatically
             try {
