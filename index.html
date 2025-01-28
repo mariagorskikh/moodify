@@ -24,6 +24,93 @@
 
         <audio id="audio-clip" controls class="hidden"></audio>
 
+        <div id="audio-editor" class="hidden">
+            <h3>Split Audio Clip</h3>
+            <p class="editor-instructions">Click on the waveform to set playback position. Use the time controls below to define your clip:</p>
+            
+            <div class="waveform-container">
+                <div class="waveform-labels">
+                    <span class="start-label">Start</span>
+                    <span class="end-label">End</span>
+                </div>
+                <canvas id="waveform"></canvas>
+                <div id="time-marker"></div>
+                <div id="selection-overlay"></div>
+            </div>
+
+            <div class="time-controls">
+                <div class="time-input">
+                    <label for="start-time">Start Time (s):</label>
+                    <div class="time-input-group">
+                        <input type="number" id="start-time" min="0" step="0.1" value="0">
+                        <button class="set-current-time" data-target="start">Set Current</button>
+                    </div>
+                </div>
+                <div class="time-input">
+                    <label for="end-time">End Time (s):</label>
+                    <div class="time-input-group">
+                        <input type="number" id="end-time" min="0" step="0.1" value="0">
+                        <button class="set-current-time" data-target="end">Set Current</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="split-controls">
+                <button id="preview-split" class="neon-button">Preview Split</button>
+                <button id="split-clip" class="neon-button">Download Split</button>
+            </div>
+        </div>
+
+        <div id="track-mixer" class="hidden">
+            <h3>Mix Tracks</h3>
+            <p class="editor-instructions">Upload multiple audio tracks and adjust their settings to create a unique mix:</p>
+            
+            <div class="track-list">
+                <!-- Tracks will be added here dynamically -->
+            </div>
+
+            <div class="track-controls">
+                <div class="upload-controls">
+                    <label for="track-upload" class="neon-button">
+                        <span class="button-icon">+</span> Add Track
+                        <input type="file" id="track-upload" accept="audio/*" multiple class="hidden">
+                    </label>
+                </div>
+
+                <div class="mix-controls">
+                    <button id="preview-mix" class="neon-button">Preview Mix</button>
+                    <button id="download-mix" class="neon-button">Download Mix</button>
+                </div>
+            </div>
+        </div>
+
+        <template id="track-template">
+            <div class="track-item">
+                <div class="track-header">
+                    <span class="track-name"></span>
+                    <button class="remove-track">×</button>
+                </div>
+                <div class="track-settings">
+                    <div class="setting-group">
+                        <label>Volume</label>
+                        <input type="range" class="volume-slider" min="0" max="100" value="100">
+                        <span class="volume-value">100%</span>
+                    </div>
+                    <div class="setting-group">
+                        <label>Start Time (s)</label>
+                        <input type="number" class="start-time" min="0" step="0.1" value="0">
+                    </div>
+                    <div class="setting-group">
+                        <label>Trim Length (s)</label>
+                        <input type="number" class="trim-length" min="0" step="0.1">
+                    </div>
+                </div>
+                <div class="track-waveform">
+                    <canvas class="waveform-canvas"></canvas>
+                </div>
+            </div>
+        </template>
+
         <div class="button-container hidden">
             <button id="save-clip" class="neon-button">Download</button>
             <button id="retry" class="neon-button">Try Another</button>

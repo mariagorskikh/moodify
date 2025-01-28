@@ -9,6 +9,7 @@ import logging
 import traceback
 import re
 from werkzeug.utils import secure_filename
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -23,10 +24,13 @@ logger = logging.getLogger(__name__)
 # Create temporary directories for processing
 TEMP_DIR = tempfile.mkdtemp()
 OUTPUT_DIR = os.path.join(TEMP_DIR, 'output')
+UPLOAD_FOLDER = os.path.join(TEMP_DIR, 'uploads')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 logger.info(f"Temporary directory created at: {TEMP_DIR}")
 logger.info(f"Output directory created at: {OUTPUT_DIR}")
+logger.info(f"Upload directory created at: {UPLOAD_FOLDER}")
 
 def extract_video_id(url):
     """Extract the video ID from various YouTube URL formats."""
@@ -113,12 +117,12 @@ def apply_audio_effect(input_path, output_path, effect_type='slow_reverb'):
                 'reverb_decay': 0.3
             },
             'intense': {
-                'speed': 1.15,
+                'speed': 1.35,
                 'reverb_delay': 25,
                 'reverb_decay': 0.2
             },
             'melodic': {
-                'speed': 1.0,
+                'speed': 0.9,
                 'reverb_delay': 70,
                 'reverb_decay': 0.5
             },
@@ -215,6 +219,93 @@ def process_youtube_audio(url, effect_type='slow_reverb'):
             os.remove(download_path + '.mp3')
         raise ValueError("An unexpected error occurred while processing the video")
 
+def split_audio(input_path, start_time, end_time, output_path):
+    """Split audio file between start_time and end_time."""
+    try:
+        # Use ffmpeg with accurate seeking
+        command = [
+            'ffmpeg',
+            '-y',  # Overwrite output file if it exists
+            '-ss', str(start_time),  # Start time
+            '-i', input_path,  # Input file
+            '-t', str(end_time - start_time),  # Duration
+            '-acodec', 'libmp3lame',  # Use MP3 codec
+            '-ar', '44100',  # Audio sample rate
+            '-ab', '192k',  # Audio bitrate
+            output_path
+        ]
+        
+        result = subprocess.run(command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"Error splitting audio: {result.stderr}")
+            raise Exception(f"Failed to split audio: {result.stderr}")
+            
+        return output_path
+    except Exception as e:
+        logger.error(f"Error in split_audio: {str(e)}")
+        raise
+
+def mix_audio_tracks(tracks_data):
+    """Mix multiple audio tracks with specified parameters."""
+    try:
+        # Create a temporary directory for track processing
+        temp_dir = os.path.join(TEMP_DIR, f'mix_{uuid.uuid4()}')
+        os.makedirs(temp_dir, exist_ok=True)
+        output_path = os.path.join(temp_dir, 'mixed.mp3')
+        
+        # Process each track and prepare FFmpeg filter complex
+        filter_complex = []
+        inputs = []
+        
+        for i, track in enumerate(tracks_data):
+            # Save track to temporary file
+            track_path = os.path.join(temp_dir, f'track_{i}.mp3')
+            track['file'].save(track_path)
+            inputs.extend(['-i', track_path])
+            
+            # Add volume and trim filter
+            volume = float(track['volume']) / 100
+            start_time = float(track['start_time'])
+            duration = float(track['trim_length']) if track['trim_length'] else None
+            
+            filter_str = f'[{i}]volume={volume}'
+            if start_time > 0:
+                filter_str += f',adelay={int(start_time*1000)}|{int(start_time*1000)}'
+            if duration:
+                filter_str += f',atrim=0:{duration}'
+            filter_str += f'[a{i}]'
+            
+            filter_complex.append(filter_str)
+        
+        # Mix all tracks
+        mix_str = ''.join(f'[a{i}]' for i in range(len(tracks_data)))
+        filter_complex.append(f'{mix_str}amix=inputs={len(tracks_data)}:normalize=0[out]')
+        
+        # Build FFmpeg command
+        command = [
+            'ffmpeg', '-y',
+            *inputs,
+            '-filter_complex', ';'.join(filter_complex),
+            '-map', '[out]',
+            '-acodec', 'libmp3lame',
+            '-ar', '44100',
+            '-ab', '192k',
+            output_path
+        ]
+        
+        result = subprocess.run(command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"Error mixing audio: {result.stderr}")
+            raise Exception(f"Failed to mix audio: {result.stderr}")
+        
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Error in mix_audio_tracks: {str(e)}")
+        raise
+
 @app.route('/api/transform', methods=['POST'])
 def transform_audio():
     try:
@@ -253,6 +344,72 @@ def transform_audio():
         logger.error(f"Error in transform_audio: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'error': 'An unexpected error occurred'}), 500
+
+@app.route('/api/split', methods=['POST'])
+def split_audio_endpoint():
+    try:
+        if 'audio_file' not in request.files:
+            return jsonify({'error': 'No audio file provided'}), 400
+            
+        audio_file = request.files['audio_file']
+        start_time = float(request.form['start_time'])
+        end_time = float(request.form['end_time'])
+        
+        # Save the uploaded file temporarily
+        temp_input = os.path.join(UPLOAD_FOLDER, 'temp_input.mp3')
+        audio_file.save(temp_input)
+        
+        # Generate output path
+        output_filename = f'split_{start_time}_{end_time}.mp3'
+        output_path = os.path.join(UPLOAD_FOLDER, output_filename)
+        
+        try:
+            # Split the audio
+            split_audio(temp_input, start_time, end_time, output_path)
+            
+            # Send the file back to the client
+            return send_file(output_path, as_attachment=True)
+        finally:
+            # Clean up temporary files
+            if os.path.exists(temp_input):
+                os.remove(temp_input)
+            if os.path.exists(output_path):
+                os.remove(output_path)
+                
+    except Exception as e:
+        logger.error(f"Error in split_audio_endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mix', methods=['POST'])
+def mix_tracks_endpoint():
+    try:
+        if not request.files:
+            return jsonify({'error': 'No audio files provided'}), 400
+        
+        # Collect track data
+        tracks_data = []
+        for key in request.files:
+            if key.startswith('track_'):
+                track_num = key.split('_')[1]
+                tracks_data.append({
+                    'file': request.files[key],
+                    'volume': request.form.get(f'volume_{track_num}', '100'),
+                    'start_time': request.form.get(f'start_time_{track_num}', '0'),
+                    'trim_length': request.form.get(f'trim_length_{track_num}', '')
+                })
+        
+        if not tracks_data:
+            return jsonify({'error': 'No valid tracks found'}), 400
+        
+        # Mix the tracks
+        output_path = mix_audio_tracks(tracks_data)
+        
+        # Send the mixed file
+        return send_file(output_path, as_attachment=True, download_name='mixed.mp3')
+        
+    except Exception as e:
+        logger.error(f"Error in mix_tracks_endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
